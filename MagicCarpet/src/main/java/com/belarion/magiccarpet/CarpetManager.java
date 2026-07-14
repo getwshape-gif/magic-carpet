@@ -32,9 +32,10 @@ public class CarpetManager {
     // pour rester parfaitement fluide meme en sprint + saut avec Speed 2 ou plus.
     private static final long TICK_INTERVAL = 1L;
 
-    // On ne verifie la presence d'un ennemi que toutes les X executions du tick ci-dessus
-    // (10 executions * 1 tick = toutes les 0.5s, pour ne pas surcharger le serveur avec la reflexion).
-    private static final int ENEMY_CHECK_EVERY_N_TICKS = 10;
+    // On ne verifie la zone protegee (spawn/warzone) que toutes les X executions du tick
+    // ci-dessus (10 executions * 1 tick = toutes les 0.5s, pour ne pas surcharger le
+    // serveur avec la reflexion vers l'API de factions).
+    private static final int ZONE_CHECK_EVERY_N_TICKS = 10;
 
     // Vitesse Y a partir de laquelle on considere que le joueur a saute.
     private static final double JUMP_VELOCITY_THRESHOLD = 0.2D;
@@ -90,7 +91,7 @@ public class CarpetManager {
             @Override
             public void run() {
                 tickCount++;
-                tick(player, session, tickCount % ENEMY_CHECK_EVERY_N_TICKS == 0);
+                tick(player, session, tickCount % ZONE_CHECK_EVERY_N_TICKS == 0);
             }
         }.runTaskTimer(plugin, TICK_INTERVAL, TICK_INTERVAL);
 
@@ -142,7 +143,7 @@ public class CarpetManager {
 
     /**
      * Accorde l'immunite aux degats de chute suite a la desactivation du tapis, peu importe
-     * la cause (commande manuelle, ennemi proche, zone protegee, teleportation, deconnexion...).
+     * la cause (commande manuelle, zone protegee, teleportation, deconnexion...).
      *
      * On ne verifie plus player.isOnGround() ici : au moment ou le tapis disparait, le joueur
      * est presque toujours "au sol" au sens du jeu puisqu'il se tenait sur le bloc de verre qui
@@ -195,12 +196,6 @@ public class CarpetManager {
         }
 
         if (checkSafety) {
-            if (FactionIntegration.hasEnemyNearby(player, FactionIntegration.ENEMY_CHECK_RADIUS)) {
-                forceRemoveCarpet(player, session,
-                        "Un ennemi est trop proche (moins de " + (int) FactionIntegration.ENEMY_CHECK_RADIUS
-                        + " blocs) - tapis magique desactive automatiquement !");
-                return;
-            }
             if (FactionIntegration.isInWarOrSafeZone(player.getLocation())
                     || FactionIntegration.isNearWorldSpawn(player.getLocation())) {
                 forceRemoveCarpet(player, session,
