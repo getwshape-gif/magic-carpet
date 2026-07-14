@@ -19,15 +19,19 @@ import java.util.UUID;
 /**
  * Gere toutes les sessions actives de tapis magique.
  * Un joueur = au maximum une session active a la fois.
+ *
+ * IMPORTANT : ce gestionnaire ne teleporte JAMAIS le joueur pour le "recaler" sur la
+ * plateforme. On se contente de faire apparaitre les blocs exactement sous ses pieds
+ * et de laisser la physique naturelle du jeu (gravite, collision) faire le reste.
+ * Teleporter a chaque tick provoquait des saccades ("rollback") car ca entre en
+ * conflit avec la prediction de mouvement du client Minecraft.
  */
 public class CarpetManager {
 
-    // Delai (en ticks) entre chaque mise a jour du tapis (suivi + saut/sneak). 2 ticks = fluide.
+    // Delai (en ticks) entre chaque mise a jour du tapis. 2 ticks = fluide sans surcharger le serveur.
     private static final long TICK_INTERVAL = 2L;
 
-    // On ne verifie la presence d'un ennemi que toutes les X executions du tick ci-dessus,
-    // pour ne pas scanner tous les joueurs en ligne 10 fois par seconde inutilement.
-    // 5 * 2 ticks = verification toutes les 0.5 secondes, largement assez pour etre "instantane".
+    // On ne verifie la presence d'un ennemi que toutes les X executions du tick ci-dessus.
     private static final int ENEMY_CHECK_EVERY_N_TICKS = 5;
 
     // Vitesse Y a partir de laquelle on considere que le joueur a saute.
@@ -36,8 +40,7 @@ public class CarpetManager {
     private final MagicCarpetPlugin plugin;
     private final Map<UUID, CarpetSession> sessions = new HashMap<UUID, CarpetSession>();
 
-    // Joueurs qui ne doivent PAS prendre de degats de chute a leur prochain atterrissage
-    // (utilise quand on retire le tapis alors que le joueur est en l'air).
+    // Joueurs qui ne doivent PAS prendre de degats de chute a leur prochain atterrissage.
     private final Set<UUID> fallImmune = new HashSet<UUID>();
 
     public CarpetManager(MagicCarpetPlugin plugin) {
@@ -57,15 +60,6 @@ public class CarpetManager {
     }
 
     /**
-     * True si le joueur a un tapis actif et que le teleport en cours est notre propre
-     * ajustement de hauteur (a ignorer par l'ecouteur de teleportation).
-     */
-    public boolean isInternalTeleport(UUID uuid) {
-        CarpetSession session = sessions.get(uuid);
-        return session != null && session.isInternalTeleport();
-    }
-
-    /**
      * Active le tapis magique sous les pieds du joueur.
      * Les verifications (zone, combat) doivent avoir deja ete faites par l'appelant (CarpetCommand).
      */
@@ -80,11 +74,9 @@ public class CarpetManager {
         final CarpetSession session = new CarpetSession(player.getUniqueId(), platformY);
         sessions.put(player.getUniqueId(), session);
 
-        // Place la plateforme initiale et fait tenir le joueur pile dessus
+        // Place la plateforme initiale pile sous les pieds actuels du joueur (aucun teleport requis).
         placePlatform(session, loc.getBlockX(), loc.getBlockZ(), player.getWorld().getName());
-        snapPlayerOnPlatform(player, session);
 
-        // Boucle de mise a jour: suit le joueur, gere saut/sneak, ennemi proche, zone protegee
         BukkitTask task = new BukkitRunnable() {
             private int tickCount = 0;
 
@@ -99,8 +91,7 @@ public class CarpetManager {
     }
 
     /**
-     * Coupe le tapis magique suite a la commande /mc. Si le joueur est en l'air, il ne
-     * prendra pas de degats de chute a son prochain atterrissage.
+     * Coupe le tapis magique suite a la commande /mc.
      */
     public void removeCarpet(Player player) {
         CarpetSession session = sessions.remove(player.getUniqueId());
@@ -130,10 +121,6 @@ public class CarpetManager {
         forceRemoveCarpet(player, session, "Tapis magique desactive : teleportation detectee.");
     }
 
-    /**
-     * Coupe le tapis instantanement suite a une detection automatique (ennemi proche, zone
-     * protegee, teleportation) et previent le joueur. Applique aussi l'immunite de chute.
-     */
     private void forceRemoveCarpet(Player player, CarpetSession session, String reasonMessage) {
         sessions.remove(player.getUniqueId());
 
@@ -150,10 +137,6 @@ public class CarpetManager {
         player.sendMessage(ChatColor.RED + reasonMessage);
     }
 
-    /**
-     * Retire proprement tous les tapis actifs (utilise a la desactivation du plugin
-     * ou a la deconnexion d'un joueur).
-     */
     public void disableAll() {
         for (CarpetSession session : new HashMap<UUID, CarpetSession>(sessions).values()) {
             if (session.getTask() != null) {
@@ -185,7 +168,6 @@ public class CarpetManager {
             return;
         }
 
-        // --- Verifications de securite: ennemi proche ou zone protegee ---
         if (checkSafety) {
             if (FactionIntegration.hasEnemyNearby(player, FactionIntegration.ENEMY_CHECK_RADIUS)) {
                 forceRemoveCarpet(player, session,
@@ -204,33 +186,22 @@ public class CarpetManager {
         Location loc = player.getLocation();
         double velocityY = player.getVelocity().getY();
         boolean sneaking = player.isSneaking();
+        int currentFeetY = loc.getBlockY();
 
-        // --- Sneak: on descend d'un bloc a chaque tick tant que le joueur maintient sneak ---
         if (sneaking) {
             session.setPlatformY(session.getPlatformY() - 1);
             session.setAscending(false);
-        }
-        // --- Saut detecte: le joueur monte d'un bloc, une seule fois par saut ---
-        else if (velocityY > JUMP_VELOCITY_THRESHOLD && !session.isAscending()) {
+        } else if (velocityY > JUMP_VELOCITY_THRESHOLD && !session.isAscending()) {
             session.setPlatformY(session.getPlatformY() + 1);
             session.setAscending(true);
-        }
-        // Le joueur est retombe / stabilise: on autorise un nouveau saut
-        else if (velocityY <= 0) {
+        } else if (velocityY <= 0) {
             session.setAscending(false);
+            session.setPlatformY(currentFeetY - 1);
         }
 
-        // Deplace la plateforme sous le joueur (suit sa position X/Z)
         placePlatform(session, loc.getBlockX(), loc.getBlockZ(), player.getWorld().getName());
-
-        // Remet le joueur exactement au-dessus de la plateforme si besoin
-        snapPlayerOnPlatform(player, session);
     }
 
-    /**
-     * Construit (ou deplace) la plateforme 3x3 de verre. Restaure d'abord les anciens blocs,
-     * puis place les nouveaux et sauvegarde leur etat d'origine.
-     */
     private void placePlatform(CarpetSession session, int centerX, int centerZ, String worldName) {
         restoreBlocks(session);
 
@@ -249,9 +220,6 @@ public class CarpetManager {
         session.setPlacedBlocks(saved);
     }
 
-    /**
-     * Restaure les blocs d'origine remplaces par la plateforme.
-     */
     private void restoreBlocks(CarpetSession session) {
         Map<Location, BlockState> placed = session.getPlacedBlocks();
         if (placed == null || placed.isEmpty()) {
@@ -261,24 +229,5 @@ public class CarpetManager {
             state.update(true, false);
         }
         placed.clear();
-    }
-
-    /**
-     * Teleporte le joueur pile au-dessus de la plateforme (garde X/Z/yaw/pitch, ajuste seulement Y).
-     * Marque le teleport comme "interne" pour que l'ecouteur ne le confonde pas avec un vrai
-     * /spawn, /tpa, /home, etc.
-     */
-    private void snapPlayerOnPlatform(Player player, CarpetSession session) {
-        Location loc = player.getLocation();
-        double expectedY = session.getPlatformY() + 1;
-
-        if (Math.abs(loc.getY() - expectedY) > 0.05) {
-            Location target = loc.clone();
-            target.setY(expectedY);
-
-            session.setInternalTeleport(true);
-            player.teleport(target);
-            session.setInternalTeleport(false);
-        }
     }
 }
