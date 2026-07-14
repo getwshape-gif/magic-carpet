@@ -43,7 +43,12 @@ public class CarpetListener implements Listener {
 
         Player player = (Player) event.getEntity();
 
-        if (carpetManager.isFallImmune(player.getUniqueId())) {
+        // Tant que le tapis est actif, on annule TOUJOURS les degats de chute : la descente
+        // en sneak retire puis replace un bloc sous le joueur a chaque tick, ce qui peut
+        // generer de courtes micro-chutes que le jeu comptabilise, meme sans jamais couper
+        // le tapis. En plus de ca, l'immunite ponctuelle couvre la chute juste apres une
+        // desactivation (manuelle, ennemi, zone, teleportation).
+        if (carpetManager.hasCarpet(player) || carpetManager.isFallImmune(player.getUniqueId())) {
             event.setCancelled(true);
             carpetManager.clearFallImmune(player.getUniqueId());
         }
@@ -92,10 +97,12 @@ public class CarpetListener implements Listener {
 
         double distance = worldChanged ? Double.MAX_VALUE : from.distance(to);
 
+        // Petit ajustement (le tapis qui suit le joueur en hauteur) : on ignore.
         if (distance < REAL_TELEPORT_DISTANCE) {
             return;
         }
 
+        // Vraie teleportation (/spawn, /tpa, /home, ender pearl lointain, etc.) : on coupe le tapis.
         carpetManager.removeDueToTeleport(player);
     }
 
