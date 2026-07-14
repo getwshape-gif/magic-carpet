@@ -18,15 +18,10 @@ public class CarpetSession {
     private Map<Location, BlockState> placedBlocks;
     private BukkitTask task;
 
-    // True pendant qu'on teleporte nous-memes le joueur pour l'ajuster sur la plateforme
-    // (pour ne pas que ce mini-teleport interne soit confondu avec un /spawn, /tpa, /home...).
-    private boolean internalTeleport;
-
     public CarpetSession(UUID playerId, int platformY) {
         this.playerId = playerId;
         this.platformY = platformY;
         this.ascending = false;
-        this.internalTeleport = false;
     }
 
     public UUID getPlayerId() {
@@ -63,13 +58,5 @@ public class CarpetSession {
 
     public void setTask(BukkitTask task) {
         this.task = task;
-    }
-
-    public boolean isInternalTeleport() {
-        return internalTeleport;
-    }
-
-    public void setInternalTeleport(boolean internalTeleport) {
-        this.internalTeleport = internalTeleport;
     }
 }
