@@ -26,7 +26,7 @@ public final class FactionIntegration {
     public static final double SPAWN_PROTECTION_RADIUS = 60.0D;
 
     // Rayon (en blocs) de detection d'un ennemi, qui coupe le tapis instantanement.
-    public static final double ENEMY_CHECK_RADIUS = 500.0D;
+    public static final double ENEMY_CHECK_RADIUS = 200.0D;
 
     private static boolean warnedZone = false;
     private static boolean warnedRelation = false;
@@ -77,11 +77,17 @@ public final class FactionIntegration {
     }
 
     /**
-     * True si un ennemi se trouve dans le rayon donne autour du joueur.
-     * Si l'integration avec le systeme de factions echoue, bascule en mode
-     * prudent : n'importe quel autre joueur dans le rayon est alors
-     * considere comme un risque (mieux vaut couper le tapis a tort qu'a
-     * raison sur un serveur PvP).
+     * True si un ennemi (relation "ENEMY" cote SaberFactions) se trouve dans le rayon
+     * donne autour du joueur. Les allies, membres de la meme faction, neutres, etc. ne
+     * declenchent JAMAIS la coupure : seule une relation explicitement "ENEMY" compte.
+     *
+     * Si l'integration avec le systeme de factions n'est pas trouvee du tout (classe
+     * introuvable : le plugin de factions n'est probablement pas installe), on bascule
+     * en mode prudent ou n'importe quel autre joueur dans le rayon est considere comme un
+     * risque. En revanche, si la classe de base existe mais qu'une verification precise
+     * echoue pour un joueur en particulier (methode introuvable pour cette version exacte
+     * du plugin, etc.), on NE coupe PAS le tapis pour ce joueur : mieux vaut ne pas gener
+     * un allie que de le traiter a tort comme un ennemi.
      */
     public static boolean hasEnemyNearby(Player player, double radius) {
         double radiusSquared = radius * radius;
@@ -111,27 +117,53 @@ public final class FactionIntegration {
             }
 
             if (!factionsAvailable) {
-                // Mode de secours : tout autre joueur proche est traite comme un risque.
+                // Aucune integration de factions detectee du tout : mode de secours.
                 return true;
             }
 
-            try {
-                Method get = mplayerClass.getMethod("get", Object.class);
-                Object otherMPlayer = get.invoke(null, other);
-
-                Method getRelationTo = mplayerClass.getMethod("getRelationTo", mplayerClass);
-                Object relation = getRelationTo.invoke(myMPlayer, otherMPlayer);
-
-                if (relation != null && "ENEMY".equalsIgnoreCase(relation.toString())) {
-                    return true;
-                }
-            } catch (Throwable t) {
-                // Si la verification precise echoue pour ce joueur precis, on reste prudent.
+            if (isEnemyRelation(mplayerClass, myMPlayer, other)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Verifie precisement si "other" est en relation ENEMY avec le joueur, via reflexion.
+     * Toute incapacite a determiner la relation (methode absente, exception...) renvoie
+     * false plutot que true, pour ne jamais bloquer un allie a cause d'une reflexion
+     * qui ne correspond pas exactement a la version du plugin de factions installee.
+     */
+    private static boolean isEnemyRelation(Class<?> mplayerClass, Object myMPlayer, Player other) {
+        try {
+            Method get = mplayerClass.getMethod("get", Object.class);
+            Object otherMPlayer = get.invoke(null, other);
+
+            Method getRelationTo = mplayerClass.getMethod("getRelationTo", mplayerClass);
+            Object relation = getRelationTo.invoke(myMPlayer, otherMPlayer);
+
+            if (relation == null) {
+                return false;
+            }
+
+            String relationName;
+            try {
+                // Pour un enum (Rel.ENEMY, Rel.ALLY, Rel.MEMBER...), name() donne le nom
+                // exact de la constante, plus fiable que toString() qui peut etre redefini
+                // (couleurs, libelle affiche, etc.).
+                Method nameMethod = relation.getClass().getMethod("name");
+                relationName = (String) nameMethod.invoke(relation);
+            } catch (Throwable t) {
+                relationName = relation.toString();
+            }
+
+            return relationName != null && relationName.equalsIgnoreCase("ENEMY");
+        } catch (Throwable t) {
+            // Verification impossible pour ce joueur precis : on ne le traite PAS comme
+            // un ennemi (evite les faux positifs sur des allies).
+            return false;
+        }
     }
 
     private static void warnOnceZone() {
