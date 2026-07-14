@@ -11,7 +11,7 @@ import org.bukkit.entity.Player;
  *
  * La desactivation est TOUJOURS autorisee (meme en combat / en zone protegee),
  * pour ne jamais bloquer un joueur en plein vol. Seule l'ACTIVATION est
- * soumise aux restrictions (zone, combat, ennemi proche).
+ * soumise aux restrictions (zone, combat).
  */
 public class CarpetCommand implements CommandExecutor {
 
@@ -50,11 +50,6 @@ public class CarpetCommand implements CommandExecutor {
         if (combatTracker.isInCombat(player.getUniqueId())) {
             long seconds = combatTracker.getRemainingSeconds(player.getUniqueId());
             player.sendMessage(ChatColor.RED + "Impossible en combat ! Réessaie dans " + seconds + " secondes.");
-            return true;
-        }
-
-        if (FactionIntegration.hasEnemyNearby(player, FactionIntegration.ENEMY_CHECK_RADIUS)) {
-            player.sendMessage(ChatColor.RED + "Un ennemi est trop proche, impossible d'activer le tapis magique.");
             return true;
         }
 
