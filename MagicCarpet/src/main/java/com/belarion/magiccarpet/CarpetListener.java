@@ -1,5 +1,6 @@
 package com.belarion.magiccarpet;
 
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
@@ -17,6 +18,11 @@ import org.bukkit.projectiles.ProjectileSource;
  * - Nettoie les sessions a la deconnexion.
  */
 public class CarpetListener implements Listener {
+
+    // Distance (en blocs) a partir de laquelle on considere qu'un teleport est une "vraie"
+    // teleportation (/spawn, /tpa, /home, ender pearl lointain...) et pas juste notre propre
+    // ajustement de hauteur du tapis (qui ne bouge le joueur que de 1-2 blocs maximum).
+    private static final double REAL_TELEPORT_DISTANCE = 5.0D;
 
     private final CarpetManager carpetManager;
     private final CombatTracker combatTracker;
@@ -73,15 +79,24 @@ public class CarpetListener implements Listener {
     public void onTeleport(PlayerTeleportEvent event) {
         Player player = event.getPlayer();
 
-        // Notre propre ajustement de hauteur (le tapis qui suit le joueur) : on ignore.
-        if (carpetManager.isInternalTeleport(player.getUniqueId())) {
+        if (!carpetManager.hasCarpet(player)) {
             return;
         }
 
-        // Vraie teleportation (/spawn, /tpa, /home, ender pearl, etc.) : on coupe le tapis.
-        if (carpetManager.hasCarpet(player)) {
-            carpetManager.removeDueToTeleport(player);
+        Location from = event.getFrom();
+        Location to = event.getTo();
+
+        boolean worldChanged = to == null || from == null
+                || to.getWorld() == null || from.getWorld() == null
+                || !to.getWorld().equals(from.getWorld());
+
+        double distance = worldChanged ? Double.MAX_VALUE : from.distance(to);
+
+        if (distance < REAL_TELEPORT_DISTANCE) {
+            return;
         }
+
+        carpetManager.removeDueToTeleport(player);
     }
 
     @EventHandler
