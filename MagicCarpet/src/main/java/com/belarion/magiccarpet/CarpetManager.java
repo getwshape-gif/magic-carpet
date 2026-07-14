@@ -39,6 +39,11 @@ public class CarpetManager {
     // Vitesse Y a partir de laquelle on considere que le joueur a saute.
     private static final double JUMP_VELOCITY_THRESHOLD = 0.2D;
 
+    // Duree maximale (en ticks) pendant laquelle l'immunite aux degats de chute reste active
+    // apres la desactivation du tapis, au cas ou le joueur ne retombe pas immediatement.
+    // 100 ticks = 5 secondes, largement suffisant pour la chute la plus longue possible.
+    private static final long FALL_IMMUNITY_TIMEOUT_TICKS = 100L;
+
     private final MagicCarpetPlugin plugin;
     private final Map<UUID, CarpetSession> sessions = new HashMap<UUID, CarpetSession>();
 
@@ -107,9 +112,7 @@ public class CarpetManager {
 
         restoreBlocks(session);
 
-        if (!player.isOnGround()) {
-            fallImmune.add(player.getUniqueId());
-        }
+        grantFallImmunity(player);
     }
 
     /**
@@ -132,11 +135,32 @@ public class CarpetManager {
 
         restoreBlocks(session);
 
-        if (!player.isOnGround()) {
-            fallImmune.add(player.getUniqueId());
-        }
+        grantFallImmunity(player);
 
         player.sendMessage(ChatColor.RED + reasonMessage);
+    }
+
+    /**
+     * Accorde l'immunite aux degats de chute suite a la desactivation du tapis, peu importe
+     * la cause (commande manuelle, ennemi proche, zone protegee, teleportation, deconnexion...).
+     *
+     * On ne verifie plus player.isOnGround() ici : au moment ou le tapis disparait, le joueur
+     * est presque toujours "au sol" au sens du jeu puisqu'il se tenait sur le bloc de verre qui
+     * vient d'etre retire. isOnGround() reste donc vrai un court instant, ce qui empechait
+     * l'immunite d'etre accordee alors que le joueur va justement chuter a cause de ce retrait.
+     * On accorde donc l'immunite systematiquement, avec une expiration de securite pour ne pas
+     * annuler des degats de chute sans rapport si le joueur ne tombe jamais entre-temps.
+     */
+    private void grantFallImmunity(final Player player) {
+        final UUID uuid = player.getUniqueId();
+        fallImmune.add(uuid);
+
+        plugin.getServer().getScheduler().runTaskLater(plugin, new Runnable() {
+            @Override
+            public void run() {
+                fallImmune.remove(uuid);
+            }
+        }, FALL_IMMUNITY_TIMEOUT_TICKS);
     }
 
     public void disableAll() {
